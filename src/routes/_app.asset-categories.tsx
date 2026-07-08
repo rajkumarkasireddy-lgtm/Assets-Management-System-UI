@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CATEGORIES, TICKET_CATEGORIES, assets, tickets } from "@/data/mock";
+import { CATEGORIES, TICKET_CATEGORIES } from "@/data/mock";
 import { Plus, Tags } from "lucide-react";
 import { toast } from "sonner";
+import { useData } from "@/contexts/data";
 
 function CategoryGrid({ items, count }: { items: string[]; count: (c: string) => number }) {
   return (
@@ -24,16 +25,20 @@ function CategoryGrid({ items, count }: { items: string[]; count: (c: string) =>
 }
 
 export const Route = createFileRoute("/_app/asset-categories")({
-  component: () => (
-    <>
-      <PageHeader title="Asset Categories" description="Classification schema for the asset catalog."
-        actions={<Button onClick={()=>toast.success("Category added")}><Plus className="h-4 w-4 mr-1"/>Add Category</Button>}/>
-      <CategoryGrid items={CATEGORIES} count={(c) => assets.filter(a => a.category === c).length}/>
-    </>
-  ),
+  component: () => {
+    const { assets } = useData();
+    return (
+      <>
+        <PageHeader title="Asset Categories" description="Classification schema for the asset catalog."
+          actions={<Button onClick={()=>toast.success("Category added")}><Plus className="h-4 w-4 mr-1"/>Add Category</Button>}/>
+        <CategoryGrid items={CATEGORIES} count={(c) => assets.filter(a => a.category === c).length}/>
+      </>
+    );
+  },
 });
 
 export function TicketCategoriesInner() {
+  const { tickets } = useData();
   return (
     <>
       <PageHeader title="Ticket Categories" description="Group and route tickets to the right team."

@@ -1,17 +1,17 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import {
-  employees as defaultEmployees,
-  assets as defaultAssets,
-  assignments as defaultAssignments,
-  tickets as defaultTickets,
-  auditLogs as defaultAuditLogs,
-  notifications as defaultNotifications,
-  type Employee,
-  type Asset,
-  type Assignment,
-  type Ticket,
-  type Role,
+import { getAuthHeaders } from "./auth";
+import type { 
+  Employee, Asset, Assignment, Ticket, Role, Vendor, Maintenance 
 } from "@/data/mock";
+import { toast } from "sonner";
+
+const originalFetch = typeof window !== "undefined" ? window.fetch : globalThis.fetch;
+const fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  if (typeof input === "string" && input.startsWith("/api")) {
+    return originalFetch(`http://localhost:8000${input}`, init);
+  }
+  return originalFetch(input, init);
+};
 
 interface DataCtx {
   employees: Employee[];
@@ -20,20 +20,25 @@ interface DataCtx {
   tickets: Ticket[];
   auditLogs: any[];
   notifications: any[];
-  createTicket: (ticket: Omit<Ticket, "id" | "status" | "createdAt" | "updatedAt" | "assignee" | "sla" | "comments" | "assignedRole" | "timeline" | "auditTrail">, actor: string) => Ticket;
-  acceptTicket: (ticketId: string, actor: string) => void;
-  updateTicketStatus: (ticketId: string, status: Ticket["status"], actor: string, role: Role, comment?: string) => void;
-  addTicketComment: (ticketId: string, actor: string, role: Role, message: string) => void;
-  escalateTicket: (ticketId: string, actor: string, remarks: string) => void;
-  reviewEscalation: (ticketId: string, approved: boolean, actor: string, remarks: string) => void;
-  resolveAssetTicket: (ticketId: string, actor: string, details: { action: NonNullable<Ticket["assetAction"]>; assetDetails: string; remarks: string; resolution: string }) => void;
-  addEmployee: (emp: Omit<Employee, "id" | "avatar" | "joinDate" | "status">) => Employee;
-  deleteEmployee: (id: string) => void;
-  assignAssets: (employeeId: string, assetIds: string[]) => void;
-  addAsset: (asset: Omit<Asset, "id">) => Asset;
-  retireAsset: (id: string) => void;
-  verifyOnboardingAsset: (employeeId: string, approved: boolean, remarks: string, actor: string) => void;
-  completeOnboardingAllocation: (employeeId: string, assetId: string, remarks: string, actor: string) => void;
+  vendors: Vendor[];
+  maintenance: Maintenance[];
+  knowledgeBase: any[];
+  loading: boolean;
+  refreshData: () => Promise<void>;
+  createTicket: (ticket: Omit<Ticket, "id" | "status" | "createdAt" | "updatedAt" | "assignee" | "sla" | "comments" | "assignedRole" | "timeline" | "auditTrail">, actor: string) => Promise<Ticket>;
+  acceptTicket: (ticketId: string, actor: string) => Promise<void>;
+  updateTicketStatus: (ticketId: string, status: Ticket["status"], actor: string, role: Role, comment?: string) => Promise<void>;
+  addTicketComment: (ticketId: string, actor: string, role: Role, message: string) => Promise<void>;
+  escalateTicket: (ticketId: string, actor: string, remarks: string) => Promise<void>;
+  reviewEscalation: (ticketId: string, approved: boolean, actor: string, remarks: string) => Promise<void>;
+  resolveAssetTicket: (ticketId: string, actor: string, details: { action: NonNullable<Ticket["assetAction"]>; assetDetails: string; remarks: string; resolution: string }) => Promise<void>;
+  addEmployee: (emp: Omit<Employee, "id" | "avatar" | "joinDate" | "status">) => Promise<Employee>;
+  deleteEmployee: (id: string) => Promise<void>;
+  assignAssets: (employeeId: string, assetIds: string[]) => Promise<void>;
+  addAsset: (asset: Omit<Asset, "id">) => Promise<Asset>;
+  retireAsset: (id: string) => Promise<void>;
+  verifyOnboardingAsset: (employeeId: string, approved: boolean, remarks: string, actor: string) => Promise<void>;
+  completeOnboardingAllocation: (employeeId: string, assetId: string, remarks: string, actor: string) => Promise<void>;
 }
 
 const Ctx = createContext<DataCtx | null>(null);
@@ -45,562 +50,589 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [maintenance, setMaintenance] = useState<Maintenance[]>([]);
+  const [knowledgeBase, setKnowledgeBase] = useState<any[]>([]);
+  
+  const [loading, setLoading] = useState(true);
   const [hydrated, setHydrated] = useState(false);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  // Mappings to convert backend schemas (with display_id and uuid) to UI schemas
+  const mapEmployee = (u: any): Employee & { uuid: string } => ({
+    id: u.display_id,
+    uuid: u.id,
+    name: u.name,
+    email: u.email,
+    department: u.department,
+    designation: u.designation,
+    manager: u.manager,
+    location: u.location,
+    status: u.status as any,
+    avatar: u.avatar || "EE",
+    phone: u.phone,
+    joinDate: u.join_date,
+    allocationDate: u.allocation_date,
+    allocationTime: u.allocation_time,
+    allocationStatus: u.allocation_status,
+    requiredAssetCategory: u.required_asset_category,
+    allocatedAssetDetails: u.allocated_asset_details,
+    allocationHistory: u.allocation_history
+  });
 
-    const localEmps = localStorage.getItem("itsm.employees");
-    const localAssets = localStorage.getItem("itsm.assets");
-    const localAsgs = localStorage.getItem("itsm.assignments");
-    const localTkts = localStorage.getItem("itsm.tickets");
-    const localAudits = localStorage.getItem("itsm.auditLogs");
-    const localNotifs = localStorage.getItem("itsm.notifications");
+  const mapAsset = (a: any): Asset & { uuid: string } => ({
+    id: a.display_id,
+    uuid: a.id,
+    name: a.name,
+    category: a.category,
+    manufacturer: a.manufacturer,
+    model: a.model,
+    serial: a.serial,
+    purchaseDate: a.purchase_date,
+    warrantyExpiry: a.warranty_expiry,
+    location: a.location,
+    assignedTo: a.assigned_to_id,  // Will resolve to display_id on load
+    status: a.status as any,
+    cost: a.cost
+  });
 
-    let loadedAssets = localAssets ? JSON.parse(localAssets) : defaultAssets;
+  const mapTicket = (t: any, resolvedAssets: any[]): Ticket & { uuid: string } => ({
+    id: t.display_id,
+    uuid: t.id,
+    title: t.title,
+    description: t.description,
+    priority: t.priority as any,
+    category: t.category,
+    status: t.status as any,
+    createdBy: t.created_by_id,  // Will resolve to creator name on load
+    assignee: t.assignee_id,     // Will resolve to assignee name on load
+    assetId: resolvedAssets.find(x => x.id === t.asset_id)?.display_id || null,
+    createdAt: t.created_at.slice(0, 10),
+    updatedAt: t.updated_at.slice(0, 10),
+    sla: t.sla as any,
+    supportResolution: t.support_resolution,
+    adminRemarks: t.admin_remarks,
+    assetAction: t.asset_action as any,
+    assetDetails: t.asset_details,
+    assetRemarks: t.asset_remarks,
+    assetResolution: t.asset_resolution,
+    assignedRole: t.assigned_role as any,
+    timeline: t.timeline,
+    auditTrail: t.audit_trail,
+    comments: (t.comments || []).map((c: any) => ({
+      author: c.author_name,
+      message: c.message,
+      at: c.created_at.slice(0, 10)
+    }))
+  });
 
-    // For the demo: ensure Emma Johnson's (EMP-1003) pre-assigned asset AST-10022 is marked Assigned
-    if (!localAssets) {
-      loadedAssets = loadedAssets.map((a: Asset) => {
-        if (a.id === "AST-10022") {
-          return { ...a, status: "Assigned" as const, assignedTo: "EMP-1003" };
-        }
-        return a;
-      });
+  const loadAllData = async () => {
+    const headers = getAuthHeaders();
+    if (!headers.Authorization) {
+      setLoading(false);
+      setHydrated(true);
+      return;
     }
 
-    setEmployees(localEmps ? JSON.parse(localEmps) : defaultEmployees);
-    setAssets(loadedAssets);
-    setAssignments(localAsgs ? JSON.parse(localAsgs) : defaultAssignments);
-    setTickets(localTkts ? JSON.parse(localTkts) : defaultTickets);
-    setAuditLogs(localAudits ? JSON.parse(localAudits) : defaultAuditLogs);
-    setNotifications(localNotifs ? JSON.parse(localNotifs) : defaultNotifications);
+    try {
+      // 1. Fetch Employees (Users API)
+      const empRes = await fetch("/api/users?limit=1000", { headers });
+      const empData = await empRes.json();
+      const loadedEmps = empData.success ? empData.data.items.map(mapEmployee) : [];
 
-    setHydrated(true);
+      // 2. Fetch Assets
+      const assetRes = await fetch("/api/assets?limit=2000", { headers });
+      const assetData = await assetRes.json();
+      const rawAssets = assetData.success ? assetData.data.items.map(mapAsset) : [];
+      
+      // Resolve asset.assignedTo (which is UUID) to employee display_id (e.g. EMP-1000)
+      const loadedAssets = rawAssets.map((asset: any) => {
+        if (asset.assignedTo) {
+          const emp = loadedEmps.find((e: any) => e.uuid === asset.assignedTo);
+          asset.assignedTo = emp ? emp.id : null;
+        }
+        return asset;
+      });
+
+      // 3. Fetch Assignments
+      const asgRes = await fetch("/api/assignments?limit=1000", { headers });
+      const asgData = await asgRes.json();
+      const loadedAsgs = asgData.success ? asgData.data.items.map((a: any) => ({
+        id: a.display_id,
+        uuid: a.id,
+        assetId: loadedAssets.find((x: any) => x.uuid === a.asset_id)?.id || a.asset_id,
+        employeeId: loadedEmps.find((e: any) => e.uuid === a.employee_id)?.id || a.employee_id,
+        assignedDate: a.assigned_date,
+        returnDate: a.return_date,
+        expectedReturn: a.expected_return,
+        status: a.status as any
+      })) : [];
+
+      // 4. Fetch Tickets
+      const tktRes = await fetch("/api/tickets?limit=1000", { headers });
+      const tktData = await tktRes.json();
+      const rawTkts = tktData.success ? tktData.data.items.map((t: any) => mapTicket(t, assetData.data.items)) : [];
+      
+      // Resolve ticket creator and assignee UUIDs to names
+      const loadedTkts = rawTkts.map((t: any) => {
+        const creator = loadedEmps.find((e: any) => e.uuid === t.createdBy);
+        t.createdBy = creator ? creator.name : "System";
+        
+        if (t.assignee) {
+          const assignee = loadedEmps.find((e: any) => e.uuid === t.assignee);
+          t.assignee = assignee ? assignee.name : null;
+        }
+        return t;
+      });
+
+      // 5. Fetch Audit Logs
+      const auditRes = await fetch("/api/audit-logs?limit=500", { headers });
+      const auditData = await auditRes.json();
+      const loadedAudits = auditData.success ? auditData.data.items : [];
+
+      // 6. Fetch Notifications
+      const notifRes = await fetch("/api/notifications", { headers });
+      const notifData = await notifRes.json();
+      const loadedNotifs = notifData.success ? notifData.data : [];
+
+      // 7. Fetch Vendors
+      const vendorRes = await fetch("/api/vendors?limit=100", { headers });
+      const vendorData = await vendorRes.json();
+      const loadedVendors = vendorData.success ? vendorData.data.items.map((v: any) => ({
+        id: v.display_id,
+        uuid: v.id,
+        name: v.name,
+        contact: v.contact,
+        email: v.email,
+        phone: v.phone,
+        category: v.category,
+        status: v.status as any,
+        contractEnd: v.contract_end
+      })) : [];
+
+      // 8. Fetch Maintenance
+      const maintRes = await fetch("/api/maintenance?limit=500", { headers });
+      const maintData = await maintRes.json();
+      const loadedMaintenance = maintData.success ? maintData.data.items.map((m: any) => ({
+        id: m.display_id,
+        uuid: m.id,
+        assetId: loadedAssets.find((x: any) => x.uuid === m.asset_id)?.id || m.asset_id,
+        engineer: m.engineer,
+        date: m.date,
+        resolution: m.resolution,
+        parts: m.parts,
+        cost: m.cost,
+        status: m.status as any
+      })) : [];
+
+      // 9. Fetch Knowledge Base
+      const kbRes = await fetch("/api/knowledge-base?limit=100", { headers });
+      const kbData = await kbRes.json();
+      const loadedKB = kbData.success ? kbData.data.items.map((k: any) => ({
+        id: k.display_id,
+        uuid: k.id,
+        title: k.title,
+        category: k.category,
+        updatedAt: k.updated_at.slice(0, 10),
+        views: k.views
+      })) : [];
+
+      setEmployees(loadedEmps);
+      setAssets(loadedAssets);
+      setAssignments(loadedAsgs);
+      setTickets(loadedTkts);
+      setAuditLogs(loadedAudits);
+      setNotifications(loadedNotifs);
+      setVendors(loadedVendors);
+      setMaintenance(loadedMaintenance);
+      setKnowledgeBase(loadedKB);
+      
+    } catch (error) {
+      console.error("Error loading api data in contexts/data.tsx:", error);
+    } finally {
+      setLoading(false);
+      setHydrated(true);
+    }
+  };
+
+  useEffect(() => {
+    loadAllData();
   }, []);
 
-  const saveAndSetEmployees = (newEmps: Employee[]) => {
-    setEmployees(newEmps);
-    localStorage.setItem("itsm.employees", JSON.stringify(newEmps));
+  const refreshData = async () => {
+    await loadAllData();
   };
 
-  const saveAndSetAssets = (newAssets: Asset[]) => {
-    setAssets(newAssets);
-    localStorage.setItem("itsm.assets", JSON.stringify(newAssets));
-  };
-
-  const saveAndSetAssignments = (newAsgs: Assignment[]) => {
-    setAssignments(newAsgs);
-    localStorage.setItem("itsm.assignments", JSON.stringify(newAsgs));
-  };
-
-  const saveAndSetAuditLogs = (newLogs: any[]) => {
-    setAuditLogs(newLogs);
-    localStorage.setItem("itsm.auditLogs", JSON.stringify(newLogs));
-  };
-
-  const saveAndSetNotifications = (newNotifs: any[]) => {
-    setNotifications(newNotifs);
-    localStorage.setItem("itsm.notifications", JSON.stringify(newNotifs));
-  };
-
-  const saveAndSetTickets = (newTickets: Ticket[]) => {
-    setTickets(newTickets);
-    localStorage.setItem("itsm.tickets", JSON.stringify(newTickets));
-  };
-
-  const nowStamp = () => new Date().toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  });
-
-  const today = () => new Date().toISOString().slice(0, 10);
-
-  const addAuditLog = (action: string, user: string, target: string) => {
-    const nextLogIdNum = Math.max(...auditLogs.map(l => parseInt(l.id.replace("LOG-", "")) || 0), 119) + 1;
-    const newLog = {
-      id: `LOG-${nextLogIdNum}`,
-      action,
-      user,
-      target,
-      timestamp: today(),
-      ip: "10.0.1.25"
-    };
-    saveAndSetAuditLogs([newLog, ...auditLogs]);
-  };
-
-  const addNotification = (title: string, type: "info" | "warning" | "success" | "danger" = "info") => {
-    const newNotif = {
-      id: String(Date.now()),
-      title,
-      type,
-      time: "Just now",
-      unread: true
-    };
-    saveAndSetNotifications([newNotif, ...notifications]);
-  };
-
-  const timelineStep = (
-    step: string,
-    actor: string,
-    role: Role | "system",
-    remarks?: string,
-    status?: Ticket["status"]
-  ) => ({
-    step,
-    timestamp: nowStamp(),
-    actor,
-    role,
-    remarks,
-    status
-  });
-
-  const auditEntry = (
-    user: string,
-    role: Role | "system",
-    toStatus: Ticket["status"],
-    fromStatus?: Ticket["status"],
-    comment?: string
-  ) => ({
-    user,
-    role,
-    timestamp: nowStamp(),
-    fromStatus,
-    toStatus,
-    comment
-  });
-
-  const normalizeTicket = (ticket: Ticket): Ticket => {
-    const timeline = ticket.timeline && ticket.timeline.length > 0
-      ? ticket.timeline
-      : [
-          { step: "Ticket Raised", timestamp: ticket.createdAt, actor: ticket.createdBy, role: "employee" as const, remarks: "Employee submitted the support request.", status: "Open" as const },
-          { step: "Assigned to Support", timestamp: ticket.createdAt, actor: "System", role: "system" as const, remarks: "Ticket routed to the support queue.", status: "Open" as const }
-        ];
-    const auditTrail = ticket.auditTrail && ticket.auditTrail.length > 0
-      ? ticket.auditTrail
-      : [{ user: ticket.createdBy, role: "employee" as const, timestamp: ticket.createdAt, toStatus: ticket.status, comment: "Initial ticket state" }];
-    return {
-      ...ticket,
-      assignedRole: ticket.assignedRole ?? (
-        ticket.status === "Pending Administration Approval" ? "admin" :
-        ticket.status === "Approved for Asset Manager" ? "asset_manager" :
-        "support"
-      ),
-      timeline,
-      auditTrail
-    };
-  };
-
-  const updateTicket = (
-    ticketId: string,
-    actor: string,
-    role: Role,
-    status: Ticket["status"],
-    step: string,
-    remarks?: string,
-    patch?: Partial<Ticket>
-  ) => {
-    let nextTicket: Ticket | undefined;
-    const updated = tickets.map(t => {
-      if (t.id !== ticketId) return t;
-      const current = normalizeTicket(t);
-      const next = {
-        ...current,
-        ...patch,
-        status,
-        updatedAt: today(),
-        timeline: [...(current.timeline || []), timelineStep(step, actor, role, remarks, status)],
-        auditTrail: [...(current.auditTrail || []), auditEntry(actor, role, status, current.status, remarks)]
-      };
-      nextTicket = next;
-      return next;
-    });
-    saveAndSetTickets(updated);
-    if (nextTicket) addAuditLog(step, actor, ticketId);
-  };
-
-  const createTicket = (
-    ticketData: Omit<Ticket, "id" | "status" | "createdAt" | "updatedAt" | "assignee" | "sla" | "comments" | "assignedRole" | "timeline" | "auditTrail">,
-    actor: string
-  ) => {
-    const nextIdNum = Math.max(...tickets.map(t => parseInt(t.id.replace("TKT-", "")) || 0), 4999) + 1;
-    const id = `TKT-${nextIdNum}`;
-    const stamp = nowStamp();
-    const newTicket: Ticket = {
-      ...ticketData,
-      id,
-      status: "Open",
-      assignee: null,
-      createdAt: today(),
-      updatedAt: today(),
-      sla: ticketData.priority === "Critical" ? "At Risk" : "On Track",
-      comments: [{ author: actor, message: ticketData.description, at: today() }],
-      assignedRole: "support",
-      timeline: [
-        { step: "Ticket Raised", timestamp: stamp, actor, role: "employee", remarks: "Employee submitted the support request.", status: "Open" },
-        { step: "Assigned to Support", timestamp: stamp, actor: "System", role: "system", remarks: "Ticket routed to the support queue.", status: "Open" }
-      ],
-      auditTrail: [{ user: actor, role: "employee", timestamp: stamp, toStatus: "Open", comment: "Ticket created" }]
-    };
-    saveAndSetTickets([newTicket, ...tickets]);
-    addAuditLog("Ticket Raised", actor, id);
-    addNotification(`${id} opened in Support queue`, "info");
-    return newTicket;
-  };
-
-  const acceptTicket = (ticketId: string, actor: string) => {
-    updateTicket(ticketId, actor, "support", "Assigned", "Assigned to Support", "Support engineer accepted the ticket.", { assignee: actor, assignedRole: "support" });
-  };
-
-  const updateTicketStatus = (ticketId: string, status: Ticket["status"], actor: string, role: Role, comment?: string) => {
-    const step = status === "In Progress" ? "In Progress" : status === "Resolved" ? "Resolved" : status === "Closed" ? "Closed" : "Status Updated";
-    const patch: Partial<Ticket> = {};
-    if (comment) {
-      const current = tickets.find(t => t.id === ticketId);
-      patch.comments = [...(current?.comments || []), { author: actor, message: comment, at: today() }];
-      if (status === "Resolved") patch.supportResolution = comment;
-    }
-    updateTicket(ticketId, actor, role, status, step, comment, patch);
-  };
-
-  const addTicketComment = (ticketId: string, actor: string, role: Role, message: string) => {
-    const current = tickets.find(t => t.id === ticketId);
-    if (!current || !message.trim()) return;
-    const normalized = normalizeTicket(current);
-    const updated = tickets.map(t => t.id === ticketId ? {
-      ...normalized,
-      comments: [...(normalized.comments || []), { author: actor, message: message.trim(), at: today() }],
-      updatedAt: today(),
-      auditTrail: [...(normalized.auditTrail || []), auditEntry(actor, role, normalized.status, normalized.status, message.trim())]
-    } : t);
-    saveAndSetTickets(updated);
-    addAuditLog("Ticket Comment Added", actor, ticketId);
-  };
-
-  const escalateTicket = (ticketId: string, actor: string, remarks: string) => {
-    updateTicket(
-      ticketId,
-      actor,
-      "support",
-      "Pending Administration Approval",
-      "Pending Administration Approval",
-      remarks || "Support escalation requested.",
-      { assignedRole: "admin", adminRemarks: undefined }
-    );
-    addNotification(`${ticketId} pending administration approval`, "warning");
-  };
-
-  const reviewEscalation = (ticketId: string, approved: boolean, actor: string, remarks: string) => {
-    if (approved) {
-      updateTicket(
-        ticketId,
-        actor,
-        "admin",
-        "Approved for Asset Manager",
-        "Approved",
-        remarks || "Escalation approved for asset manager action.",
-        { assignedRole: "asset_manager", adminRemarks: remarks }
-      );
-      const current = tickets.find(t => t.id === ticketId);
-      if (current) {
-        const normalized = normalizeTicket(current);
-        const updated = tickets.map(t => t.id === ticketId ? {
-          ...normalized,
-          status: "Approved for Asset Manager" as const,
-          assignedRole: "asset_manager" as const,
-          adminRemarks: remarks,
-          updatedAt: today(),
-          timeline: [
-            ...(normalized.timeline || []),
-            timelineStep("Approved", actor, "admin", remarks || "Escalation approved.", "Approved for Asset Manager"),
-            timelineStep("Assigned to Asset Manager", "System", "system", "Ticket routed to the asset manager queue.", "Approved for Asset Manager")
-          ],
-          auditTrail: [
-            ...(normalized.auditTrail || []),
-            auditEntry(actor, "admin", "Approved for Asset Manager", normalized.status, remarks || "Approved"),
-            auditEntry("System", "system", "Approved for Asset Manager", "Approved for Asset Manager", "Assigned to Asset Manager")
-          ]
-        } : t);
-        saveAndSetTickets(updated);
+  const createTicket = async (ticketData: any, actor: string) => {
+    // Translate asset display_id back to UUID if specified
+    const assetUuid = ticketData.assetId 
+      ? assets.find((a: any) => a.id === ticketData.assetId)?.uuid || null 
+      : null;
+      
+    try {
+      const response = await fetch("/api/tickets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          title: ticketData.title,
+          description: ticketData.description,
+          priority: ticketData.priority,
+          category: ticketData.category,
+          asset_id: assetUuid
+        }),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        await refreshData();
+        return result.data;
+      } else {
+        toast.error(result.message || "Failed to create ticket");
+        throw new Error(result.message);
       }
-      addNotification(`${ticketId} approved for Asset Manager`, "success");
-    } else {
-      updateTicket(
-        ticketId,
-        actor,
-        "admin",
-        "Open",
-        "Rejected",
-        remarks || "Escalation rejected and returned to Support.",
-        { assignedRole: "support", adminRemarks: remarks }
-      );
-      addNotification(`${ticketId} returned to Support by Administration`, "danger");
+    } catch (e) {
+      console.error(e);
+      throw e;
     }
   };
 
-  const resolveAssetTicket = (
-    ticketId: string,
-    actor: string,
-    details: { action: NonNullable<Ticket["assetAction"]>; assetDetails: string; remarks: string; resolution: string }
-  ) => {
-    updateTicket(
-      ticketId,
-      actor,
-      "asset_manager",
-      "Resolved",
-      "Resolved",
-      details.resolution || "Asset action completed.",
-      {
-        assignedRole: "support",
-        assetAction: details.action,
-        assetDetails: details.assetDetails,
-        assetRemarks: details.remarks,
-        assetResolution: details.resolution,
-        supportResolution: details.resolution
+  const acceptTicket = async (ticketId: string, actor: string) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
+
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/accept`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to accept ticket");
       }
-    );
-    addNotification(`${ticketId} resolved by Asset Manager`, "success");
-  };
-
-  const addEmployee = (empData: Omit<Employee, "id" | "avatar" | "joinDate" | "status">) => {
-    const nextIdNum = Math.max(...employees.map(e => parseInt(e.id.replace("EMP-", "")) || 0), 999) + 1;
-    const timestamp = new Date().toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true
-    });
-
-    const nextLogIdNum = Math.max(...auditLogs.map(l => parseInt(l.id.replace("LOG-", "")) || 0), 119) + 1;
-    const newLog = {
-      id: `LOG-${nextLogIdNum}`,
-      action: "Employee Created",
-      user: "Admin User",
-      target: `EMP-${nextIdNum}`,
-      timestamp: new Date().toISOString().slice(0, 10),
-      ip: "10.0.1.25"
-    };
-
-    const newEmp: Employee = {
-      ...empData,
-      id: `EMP-${nextIdNum}`,
-      joinDate: new Date().toISOString().slice(0, 10),
-      avatar: `${empData.name.split(" ")[0]?.[0] ?? ""}${empData.name.split(" ")[1]?.[0] ?? ""}`.toUpperCase() || "EE",
-      status: "Active",
-      allocationStatus: empData.allocationStatus || "Awaiting Asset Verification",
-      allocationHistory: empData.allocationHistory || [
-        { step: "Employee Created", timestamp, actor: "Admin User", remarks: "Employee record created." },
-        { step: "Awaiting Asset Verification", timestamp, actor: "System", remarks: `Asset verification request queued for required category ${empData.requiredAssetCategory || "Laptop"}.` }
-      ]
-    };
-
-    saveAndSetEmployees([newEmp, ...employees]);
-    saveAndSetAuditLogs([newLog, ...auditLogs]);
-    return newEmp;
-  };
-
-  const deleteEmployee = (id: string) => {
-    const updated = employees.filter(e => e.id !== id);
-    saveAndSetEmployees(updated);
-  };
-
-  const assignAssets = (employeeId: string, assetIds: string[]) => {
-    // Legacy fallback wrapper
-    if (assetIds.length > 0) {
-      completeOnboardingAllocation(employeeId, assetIds[0], "Assigned from legacy trigger", "Support Engineer");
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  const verifyOnboardingAsset = (
-    employeeId: string,
-    approved: boolean,
-    remarks: string,
-    actor: string
-  ) => {
-    const timestamp = new Date().toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true
-    });
+  const updateTicketStatus = async (ticketId: string, statusVal: string, actor: string, role: Role, comment?: string) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
 
-    const targetStatus = approved ? "Ready for Allocation" : "Waiting for Inventory";
-
-    const updatedEmps = employees.map(emp => {
-      if (emp.id === employeeId) {
-        const history = [...(emp.allocationHistory || [])];
-        if (approved) {
-          history.push({
-            step: "Inventory Verified",
-            timestamp,
-            actor,
-            remarks: `Asset category ${emp.requiredAssetCategory || "Laptop"} verified and available in location.`
-          });
-          history.push({
-            step: "Ready for Allocation",
-            timestamp,
-            actor,
-            remarks: remarks || "Approved for allocation queue."
-          });
-        } else {
-          history.push({
-            step: "Waiting for Inventory",
-            timestamp,
-            actor,
-            remarks: remarks || `Requested hardware (${emp.requiredAssetCategory || "Laptop"}) is currently out of stock.`
-          });
-        }
-        return {
-          ...emp,
-          allocationStatus: targetStatus as any,
-          allocationHistory: history
-        };
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          status: statusVal,
+          support_resolution: comment || ""
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to update status");
       }
-      return emp;
-    });
-
-    const emp = employees.find(e => e.id === employeeId);
-    const nextLogIdNum = Math.max(...auditLogs.map(l => parseInt(l.id.replace("LOG-", "")) || 0), 119) + 1;
-    const newLog = {
-      id: `LOG-${nextLogIdNum}`,
-      action: approved ? "Asset Verified & Approved" : "Asset Unavailable",
-      user: actor,
-      target: employeeId,
-      timestamp: new Date().toISOString().slice(0, 10),
-      ip: "10.0.1.25"
-    };
-
-    saveAndSetEmployees(updatedEmps);
-    saveAndSetAuditLogs([newLog, ...auditLogs]);
-
-    if (!approved) {
-      const nextNotifId = String(Date.now());
-      const newNotif = {
-        id: nextNotifId,
-        title: `Procurement Alert: Allocation blocked for ${emp?.name || employeeId} (${remarks || "Waiting for Inventory"})`,
-        type: "danger" as const,
-        time: "Just now",
-        unread: true
-      };
-      saveAndSetNotifications([newNotif, ...notifications]);
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  const completeOnboardingAllocation = (
-    employeeId: string,
-    assetId: string,
-    remarks: string,
-    actor: string
-  ) => {
-    const timestamp = new Date().toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true
-    });
+  const addTicketComment = async (ticketId: string, actor: string, role: Role, message: string) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
 
-    const asset = assets.find(a => a.id === assetId);
-    if (!asset) return;
-
-    // 1. Update Employee
-    const updatedEmps = employees.map(emp => {
-      if (emp.id === employeeId) {
-        const history = [...(emp.allocationHistory || [])];
-        history.push({
-          step: "Asset Assigned",
-          timestamp,
-          actor,
-          remarks: `Assigned Asset ${assetId} (${asset.name}).`
-        });
-        history.push({
-          step: "Completed",
-          timestamp,
-          actor,
-          remarks: remarks || "Onboarding workspace setup and asset delivery completed."
-        });
-        return {
-          ...emp,
-          allocationStatus: "Completed" as const,
-          allocationHistory: history,
-          allocatedAssetDetails: {
-            assetId,
-            assetName: asset.name,
-            serialNumber: asset.serial,
-            assignedAt: timestamp,
-            assignedBy: actor,
-            remarks
-          }
-        };
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/comments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ message }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to post comment");
       }
-      return emp;
-    });
-
-    // 2. Update Asset
-    const updatedAssets = assets.map(a => {
-      if (a.id === assetId) {
-        return { ...a, status: "Assigned" as const, assignedTo: employeeId };
-      }
-      return a;
-    });
-
-    // 3. Log Assignment
-    const nextAsgIdNum = Math.max(...assignments.map(a => parseInt(a.id.replace("ASG-", "")) || 0), 1999) + 1;
-    const newAsg: Assignment = {
-      id: `ASG-${nextAsgIdNum}`,
-      assetId,
-      employeeId,
-      assignedDate: new Date().toISOString().slice(0, 10),
-      returnDate: null,
-      expectedReturn: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().slice(0, 10),
-      status: "Active" as const
-    };
-
-    // 4. Log Audit Trail
-    const nextLogIdNum = Math.max(...auditLogs.map(l => parseInt(l.id.replace("LOG-", "")) || 0), 119) + 1;
-    const newLog = {
-      id: `LOG-${nextLogIdNum}`,
-      action: "Asset Allocation Completed",
-      user: actor,
-      target: employeeId,
-      timestamp: new Date().toISOString().slice(0, 10),
-      ip: "10.0.1.25"
-    };
-
-    saveAndSetEmployees(updatedEmps);
-    saveAndSetAssets(updatedAssets);
-    saveAndSetAssignments([newAsg, ...assignments]);
-    saveAndSetAuditLogs([newLog, ...auditLogs]);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const addAsset = (assetData: Omit<Asset, "id">) => {
-    const nextIdNum = Math.max(...assets.map(a => parseInt(a.id.replace("AST-", "")) || 0), 9999) + 1;
-    const newAsset: Asset = {
-      ...assetData,
-      id: `AST-${nextIdNum}`,
-    };
-    saveAndSetAssets([newAsset, ...assets]);
-    return newAsset;
+  const escalateTicket = async (ticketId: string, actor: string, remarks: string) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
+
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/escalate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ support_resolution: remarks }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to escalate ticket");
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const retireAsset = (id: string) => {
-    const updated = assets.map(a => {
-      if (a.id === id) {
-        return { ...a, status: "Retired" as const, assignedTo: null };
+  const reviewEscalation = async (ticketId: string, approved: boolean, actor: string, remarks: string) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
+
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/review-escalation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ approved, remarks }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to review escalation");
       }
-      return a;
-    });
-    saveAndSetAssets(updated);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const resolveAssetTicket = async (ticketId: string, actor: string, details: any) => {
+    const tUuid = tickets.find((t: any) => t.id === ticketId)?.uuid;
+    if (!tUuid) return;
+
+    try {
+      const response = await fetch(`/api/tickets/${tUuid}/resolve-asset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          action: details.action,
+          asset_details: details.assetDetails,
+          remarks: details.remarks,
+          resolution: details.resolution
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to resolve ticket");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const addEmployee = async (empData: any) => {
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          name: empData.name,
+          email: empData.email,
+          role: empData.role || "employee",
+          department: empData.department,
+          designation: empData.designation,
+          manager: empData.manager,
+          location: empData.location,
+          phone: empData.phone,
+          allocation_date: empData.allocationDate,
+          allocation_time: empData.allocationTime,
+          required_asset_category: empData.requiredAssetCategory
+        }),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        await refreshData();
+        return mapEmployee(result.data);
+      } else {
+        toast.error(result.message || "Failed to create employee");
+        throw new Error(result.message);
+      }
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const deleteEmployee = async (id: string) => {
+    const eUuid = employees.find((e: any) => e.id === id)?.uuid;
+    if (!eUuid) return;
+
+    try {
+      const response = await fetch(`/api/users/${eUuid}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to delete employee");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const assignAssets = async (employeeId: string, assetIds: string[]) => {
+    if (assetIds.length === 0) return;
+    const eUuid = employees.find((e: any) => e.id === employeeId)?.uuid;
+    const aUuid = assets.find((a: any) => a.id === assetIds[0])?.uuid;
+    if (!eUuid || !aUuid) return;
+    
+    try {
+      const response = await fetch("/api/assignments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          asset_id: aUuid,
+          employee_id: eUuid,
+          assigned_date: new Date().toISOString().slice(0, 10)
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to assign asset");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const addAsset = async (assetData: any) => {
+    try {
+      const response = await fetch("/api/assets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          name: assetData.name,
+          category: assetData.category,
+          manufacturer: assetData.manufacturer,
+          model: assetData.model,
+          serial: assetData.serial,
+          purchase_date: assetData.purchaseDate,
+          warranty_expiry: assetData.warrantyExpiry,
+          location: assetData.location,
+          status: assetData.status,
+          cost: assetData.cost
+        }),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        await refreshData();
+        return mapAsset(result.data);
+      } else {
+        toast.error(result.message || "Failed to create asset");
+        throw new Error(result.message);
+      }
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const retireAsset = async (id: string) => {
+    const aUuid = assets.find((a: any) => a.id === id)?.uuid;
+    if (!aUuid) return;
+
+    try {
+      const response = await fetch(`/api/assets/${aUuid}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to retire asset");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const verifyOnboardingAsset = async (employeeId: string, approved: boolean, remarks: string, actor: string) => {
+    const eUuid = employees.find((e: any) => e.id === employeeId)?.uuid;
+    if (!eUuid) return;
+
+    try {
+      const response = await fetch(`/api/assets/onboarding/verify/${eUuid}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ approved, remarks }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to verify onboarding");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const completeOnboardingAllocation = async (employeeId: string, assetId: string, remarks: string, actor: string) => {
+    const eUuid = employees.find((e: any) => e.id === employeeId)?.uuid;
+    const aUuid = assets.find((a: any) => a.id === assetId)?.uuid;
+    if (!eUuid || !aUuid) return;
+
+    try {
+      const response = await fetch(`/api/assets/onboarding/allocate/${eUuid}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ asset_id: aUuid, remarks }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await refreshData();
+      } else {
+        toast.error(result.message || "Failed to allocate asset");
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   if (!hydrated) {
@@ -612,9 +644,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       employees,
       assets,
       assignments,
-      tickets: tickets.map(normalizeTicket),
+      tickets,
       auditLogs,
       notifications,
+      vendors,
+      maintenance,
+      knowledgeBase,
+      loading,
+      refreshData,
       createTicket,
       acceptTicket,
       updateTicketStatus,

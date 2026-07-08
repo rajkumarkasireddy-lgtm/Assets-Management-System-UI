@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DEPARTMENTS, employees, assets, tickets } from "@/data/mock";
+import { DEPARTMENTS } from "@/data/mock";
 import { Building2, Users, Plus, MoreHorizontal, DollarSign, Ticket, Laptop, Search, MapPin, ArrowLeft } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -11,9 +11,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { useData } from "@/contexts/data";
 
 export const Route = createFileRoute("/_app/departments")({
   component: () => {
+    const { employees, assets, tickets } = useData();
     const heads = ["Sarah Johnson", "Michael Chen", "Priya Sharma", "David Rodriguez", "Emma Wilson", "Amelia Kumar"];
     const [selectedDept, setSelectedDept] = useState<string | null>(null);
     const [memberSearch, setMemberSearch] = useState("");

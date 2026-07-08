@@ -3,14 +3,15 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { knowledgeBase } from "@/data/mock";
 import { useState, useMemo } from "react";
 import { BookOpen, Search, Eye } from "lucide-react";
+import { useData } from "@/contexts/data";
 
 export const Route = createFileRoute("/_app/knowledge-base")({
   component: () => {
+    const { knowledgeBase } = useData();
     const [q, setQ] = useState("");
-    const filtered = useMemo(() => knowledgeBase.filter(a => a.title.toLowerCase().includes(q.toLowerCase())), [q]);
+    const filtered = useMemo(() => knowledgeBase.filter(a => a.title.toLowerCase().includes(q.toLowerCase())), [q, knowledgeBase]);
     return (
       <>
         <PageHeader title="Knowledge Base" description="Self-service articles curated by the IT team."/>

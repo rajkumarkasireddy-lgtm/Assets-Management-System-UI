@@ -33,6 +33,7 @@ function EmployeesPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("employee");
   const [department, setDepartment] = useState("");
   const [location, setLocation] = useState("");
   const [allocationDate, setAllocationDate] = useState("");
@@ -43,6 +44,7 @@ function EmployeesPage() {
     setFirstName("");
     setLastName("");
     setEmail("");
+    setRole("employee");
     setDepartment("");
     setLocation("");
     setAllocationDate("");
@@ -51,44 +53,47 @@ function EmployeesPage() {
     setCreateOpen(true);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const isFormValid =
       firstName.trim() &&
       lastName.trim() &&
       email.trim() &&
       department &&
       location &&
-      allocationDate &&
-      allocationTime &&
-      requiredAssetCategory;
+      (role !== "employee" || (allocationDate && allocationTime && requiredAssetCategory));
 
     if (!isFormValid) {
       toast.error("Please fill in all required fields.");
       return;
     }
 
-    addEmployee({
-      name: `${firstName.trim()} ${lastName.trim()}`,
-      email: email.trim(),
-      department,
-      location,
-      designation: "Software Engineer",
-      manager: "Aarav Sharma",
-      phone: `+1 555-${String(1000 + Math.floor(Math.random() * 9000))}`,
-      allocationDate,
-      allocationTime,
-      allocationStatus: "Awaiting Asset Verification",
-      requiredAssetCategory,
-    });
+    try {
+      await addEmployee({
+        name: `${firstName.trim()} ${lastName.trim()}`,
+        email: email.trim(),
+        role,
+        department,
+        location,
+        designation: role === "support" ? "Support Engineer" : role === "asset_manager" ? "Asset Manager" : "Software Engineer",
+        manager: "Aarav Sharma",
+        phone: `+1 555-${String(1000 + Math.floor(Math.random() * 9000))}`,
+        allocationDate: role === "employee" ? allocationDate : undefined,
+        allocationTime: role === "employee" ? allocationTime : undefined,
+        allocationStatus: role === "employee" ? "Awaiting Asset Verification" : undefined,
+        requiredAssetCategory: role === "employee" ? requiredAssetCategory : undefined,
+      });
 
-    toast.success("Employee added and verification workflow initialized.");
-    setCreateOpen(false);
+      toast.success(`${role === "employee" ? "Employee" : role === "support" ? "Support Engineer" : "Asset Manager"} added and credentials sent.`);
+      setCreateOpen(false);
+    } catch (e) {
+      // Error is already toasted inside the addEmployee context method
+    }
   };
 
   const handleDelete = () => {
     if (confirmDelete) {
       deleteEmployee(confirmDelete.id);
-      toast.success("Employee archived");
+      toast.success("Employee deleted successfully");
       setConfirmDelete(null);
       if (selected?.id === confirmDelete.id) {
         setSelected(null);
@@ -295,7 +300,7 @@ function EmployeesPage() {
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader><DialogTitle>Add Employee</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Team Member</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -307,9 +312,22 @@ function EmployeesPage() {
                 <Input className="mt-1.5" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="e.g. Doe"/>
               </div>
             </div>
-            <div>
-              <Label className="text-xs font-semibold">Email <span className="text-destructive">*</span></Label>
-              <Input className="mt-1.5" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="e.g. john.doe@acmecorp.com"/>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Email <span className="text-destructive">*</span></Label>
+                <Input className="mt-1.5" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="e.g. john.doe@acmecorp.com"/>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Role <span className="text-destructive">*</span></Label>
+                <Select value={role} onValueChange={setRole}>
+                  <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select Role"/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Employee</SelectItem>
+                    <SelectItem value="support">Support Engineer</SelectItem>
+                    <SelectItem value="asset_manager">Asset Manager</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -328,38 +346,49 @@ function EmployeesPage() {
               </div>
             </div>
 
-            <div className="border-t pt-3 mt-1 space-y-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Asset Allocation Setup</span>
-              
-              <div>
-                <Label className="text-xs font-semibold flex items-center gap-1">
-                  <Laptop className="h-3 w-3 text-muted-foreground" /> Required Hardware Category <span className="text-destructive">*</span>
-                </Label>
-                <Select value={requiredAssetCategory} onValueChange={setRequiredAssetCategory}>
-                  <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select Required Category"/></SelectTrigger>
-                  <SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+            {role === "employee" && (
+              <div className="border-t pt-3 mt-1 space-y-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">Asset Onboarding Setup</span>
+                
+                <div>
+                  <Label className="text-xs font-semibold flex items-center gap-1">
+                    <Laptop className="h-3 w-3 text-muted-foreground" /> Required Hardware Category <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={requiredAssetCategory} onValueChange={setRequiredAssetCategory}>
+                    <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select Required Category"/></SelectTrigger>
+                    <SelectContent>{CATEGORIES.map(c=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs font-semibold flex items-center gap-1">
-                    <Calendar className="h-3 w-3 text-muted-foreground" /> Allocation Date <span className="text-destructive">*</span>
-                  </Label>
-                  <Input className="mt-1.5 cursor-pointer" type="date" value={allocationDate} onChange={e => setAllocationDate(e.target.value)}/>
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-muted-foreground" /> Allocation Time <span className="text-destructive">*</span>
-                  </Label>
-                  <Input className="mt-1.5 cursor-pointer" type="time" value={allocationTime} onChange={e => setAllocationTime(e.target.value)}/>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs font-semibold flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-muted-foreground" /> Allocation Date <span className="text-destructive">*</span>
+                    </Label>
+                    <Input className="mt-1.5 cursor-pointer" type="date" value={allocationDate} onChange={e => setAllocationDate(e.target.value)}/>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-muted-foreground" /> Allocation Time <span className="text-destructive">*</span>
+                    </Label>
+                    <Input className="mt-1.5 cursor-pointer" type="time" value={allocationTime} onChange={e => setAllocationTime(e.target.value)}/>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!isFormValid}>Create</Button>
+            <Button onClick={handleCreate} disabled={
+              !(
+                firstName.trim() &&
+                lastName.trim() &&
+                email.trim() &&
+                department &&
+                location &&
+                (role !== "employee" || (allocationDate && allocationTime && requiredAssetCategory))
+              )
+            }>Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -367,7 +396,7 @@ function EmployeesPage() {
       <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Delete {confirmDelete?.name}?</DialogTitle></DialogHeader>
-          <div className="text-sm text-muted-foreground">This action cannot be undone. The employee record and all associated assignments will be archived.</div>
+          <div className="text-sm text-muted-foreground">This action cannot be undone. The employee record and all associated assignments will be permanently deleted from the database.</div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete}>Delete</Button>

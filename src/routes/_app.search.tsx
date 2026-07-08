@@ -5,8 +5,8 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { employees, assets, tickets } from "@/data/mock";
 import { Users, Package, TicketIcon, Search as SearchIcon } from "lucide-react";
+import { useData } from "@/contexts/data";
 
 const searchSchema = z.object({ q: z.string().optional() });
 
@@ -16,13 +16,14 @@ export const Route = createFileRoute("/_app/search")({
 });
 
 function SearchPage() {
+  const { employees, assets, tickets } = useData();
   const { q = "" } = Route.useSearch();
   const nav = Route.useNavigate();
   const term = q.toLowerCase();
 
-  const empResults = useMemo(() => employees.filter(e => e.name.toLowerCase().includes(term) || e.id.toLowerCase().includes(term) || e.email.toLowerCase().includes(term)).slice(0, 8), [term]);
-  const assetResults = useMemo(() => assets.filter(a => a.name.toLowerCase().includes(term) || a.id.toLowerCase().includes(term) || a.serial.toLowerCase().includes(term)).slice(0, 8), [term]);
-  const ticketResults = useMemo(() => tickets.filter(t => t.title.toLowerCase().includes(term) || t.id.toLowerCase().includes(term)).slice(0, 8), [term]);
+  const empResults = useMemo(() => employees.filter(e => e.name.toLowerCase().includes(term) || e.id.toLowerCase().includes(term) || e.email.toLowerCase().includes(term)).slice(0, 8), [term, employees]);
+  const assetResults = useMemo(() => assets.filter(a => a.name.toLowerCase().includes(term) || a.id.toLowerCase().includes(term) || a.serial.toLowerCase().includes(term)).slice(0, 8), [term, assets]);
+  const ticketResults = useMemo(() => tickets.filter(t => t.title.toLowerCase().includes(term) || t.id.toLowerCase().includes(term)).slice(0, 8), [term, tickets]);
 
   return (
     <>

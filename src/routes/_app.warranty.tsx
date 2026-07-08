@@ -7,8 +7,9 @@ import { ChartCard } from "@/components/common/ChartCard";
 import { DataTable } from "@/components/common/DataTable";
 import { Card } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { assets, type Asset } from "@/data/mock";
+import { type Asset } from "@/data/mock";
 import { cn } from "@/lib/utils";
+import { useData } from "@/contexts/data";
 
 export const Route = createFileRoute("/_app/warranty")({
   component: WarrantyPage,
@@ -19,6 +20,7 @@ function daysUntil(d: string) {
 }
 
 function WarrantyPage() {
+  const { assets } = useData();
   const expiring30 = assets.filter(a => { const d = daysUntil(a.warrantyExpiry); return d >= 0 && d <= 30; });
   const expired = assets.filter(a => daysUntil(a.warrantyExpiry) < 0);
   const active = assets.filter(a => daysUntil(a.warrantyExpiry) > 30);

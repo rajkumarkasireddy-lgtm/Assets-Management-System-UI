@@ -32,17 +32,18 @@ function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [role, setRole] = useState<Role>("employee");
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormV>({
+  const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<FormV>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "demo@acmecorp.com", password: "demo1234" },
+    defaultValues: { email: "employee@acmecorp.com", password: "demo1234" },
   });
 
   const onSubmit = async (v: FormV) => {
-    await new Promise((r) => setTimeout(r, 400));
-    const name = v.email.split("@")[0].split(".").map((s) => s[0].toUpperCase() + s.slice(1)).join(" ");
-    login(role, name);
-    toast.success(`Welcome back, ${name}`);
-    navigate({ to: "/dashboard" });
+    try {
+      await login(v.email, v.password);
+      navigate({ to: "/dashboard" });
+    } catch (e) {
+      // toast error is already handled by login method in AuthContext
+    }
   };
 
   return (
@@ -105,7 +106,10 @@ function LoginPage() {
                 <button
                   key={r.id}
                   type="button"
-                  onClick={() => setRole(r.id)}
+                  onClick={() => {
+                    setRole(r.id);
+                    setValue("email", r.id === "employee" ? "employee@acmecorp.com" : r.id === "support" ? "support@acmecorp.com" : r.id === "asset_manager" ? "asset_manager@acmecorp.com" : "admin@acmecorp.com");
+                  }}
                   className={cn(
                     "text-left p-3 rounded-md border transition-all",
                     active

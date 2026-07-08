@@ -5,9 +5,10 @@ import { DataTable } from "@/components/common/DataTable";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { maintenance, assets, type Maintenance } from "@/data/mock";
+import { type Maintenance } from "@/data/mock";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useData } from "@/contexts/data";
 
 export const Route = createFileRoute("/_app/maintenance")({
   component: MaintenancePage,
@@ -18,6 +19,7 @@ function MaintenancePage() {
 }
 
 export function MaintenanceTable({ title, description, showAction }: { title: string; description?: string; showAction?: boolean }) {
+  const { maintenance, assets } = useData();
   const columns: ColumnDef<Maintenance>[] = [
     { accessorKey: "id", header: "ID" },
     { id: "asset", header: "Asset", cell: ({row}) => {

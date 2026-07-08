@@ -7,7 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Timeline } from "@/components/common/Timeline";
 import { useAuth } from "@/contexts/auth";
-import { assets, tickets } from "@/data/mock";
+import { useData } from "@/contexts/data";
 import { Mail, Phone, MapPin, Building2, Edit } from "lucide-react";
 
 export const Route = createFileRoute("/_app/profile")({
@@ -16,9 +16,10 @@ export const Route = createFileRoute("/_app/profile")({
 
 function ProfilePage() {
   const { user } = useAuth();
+  const { assets, tickets } = useData();
 
-  const myAssets = assets.filter(a => a.status === "Assigned").slice(0, 5);
-  const myTickets = tickets.slice(0, 5);
+  const myAssets = assets.filter(a => a.assignedTo === user?.id).slice(0, 5);
+  const myTickets = tickets.filter(t => t.createdBy === user?.name).slice(0, 5);
 
   return (
     <>
